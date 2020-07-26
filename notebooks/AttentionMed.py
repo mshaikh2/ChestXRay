@@ -59,17 +59,17 @@ class Attention(Layer):
                      kernel=self.kernel_q,
                      strides=(1,), padding='same')
         q = K.bias_add(q, self.bias_q)
-        q = kl.Activation('relu')(q)
+#         q = kl.Activation('relu')(q)
         k = K.conv1d(x,
                      kernel=self.kernel_k,
                      strides=(1,), padding='same')
         k = K.bias_add(k, self.bias_k)
-        k = kl.Activation('relu')(k)
+#         k = kl.Activation('relu')(k)
         v = K.conv1d(x,
                      kernel=self.kernel_v,
                      strides=(1,), padding='same')
         v = K.bias_add(v, self.bias_v)
-        v = kl.ELU(alpha=1.0)(v)
+#         v = kl.ELU(alpha=1.0)(v)
 #         print('q.shape,k.shape,v.shape,',q.shape,k.shape,v.shape)
         s = K.batch_dot(q, K.permute_dimensions(k,(0,2,1)))  # # [bs, 1, N]
     
@@ -84,7 +84,7 @@ class Attention(Layer):
                      kernel=self.kernel_o,
                      strides=(1,), padding='same')
         o = K.bias_add(o, self.bias_o)
-        o = kl.ELU(alpha=1.0)(o)
+#         o = kl.ELU(alpha=1.0)(o)
 #         print('o.shape:',o.shape)
 #         o = K.reshape(o, shape=K.shape(x))  # [bs, h, w, C]
 #         h = h + self.gamma * o
@@ -147,19 +147,19 @@ class SelfAttention(Layer):
                      kernel=self.kernel_q,
                      strides=(1,), padding='same')
         q = K.bias_add(q, self.bias_q)
-        q = kl.ELU(alpha=1.0)(q)
+#         q = kl.ELU(alpha=1.0)(q)
         
         k = K.conv1d(x,
                      kernel=self.kernel_k,
                      strides=(1,), padding='same')
         k = K.bias_add(k, self.bias_k)
-        k = kl.ELU(alpha=1.0)(k)
+#         k = kl.ELU(alpha=1.0)(k)
         
         v = K.conv1d(x,
                      kernel=self.kernel_v,
                      strides=(1,), padding='same')
         v = K.bias_add(v, self.bias_v)
-        v = kl.ELU(alpha=1.0)(v)
+#         v = kl.ELU(alpha=1.0)(v)
 #         print('q.shape,k.shape,v.shape,',q.shape,k.shape,v.shape)
         s = K.batch_dot(q, K.permute_dimensions(k,(0,2,1)))  # # [bs, N, N]
        
@@ -177,7 +177,7 @@ class SelfAttention(Layer):
                      kernel=self.kernel_o,
                      strides=(1,), padding='same')
         o = K.bias_add(o, self.bias_o)
-        o = kl.ELU(alpha=1.0)(o)
+#         o = kl.ELU(alpha=1.0)(o)
 #         x = x + self.gamma * o 
 #         print('x.shape:',x.shape)
         self.out_sh = tuple(o.shape.as_list())
@@ -185,48 +185,86 @@ class SelfAttention(Layer):
 
     def compute_output_shape(self, input_shape):
         return [self.out_sh,self.beta_shape]#, tuple(self.gamma.shape.as_list())]
-class ResidualCombine1D(Layer):
+
+class CondenseAttention2D(Layer):
     '''
-    [previous_layer, concatenated_,multiattended_output]
-    Combine multple heads and concat with previous layer
-    Use scalar gamma for weighted concatenation
-    gamma1=>residual
-    gamma2=>attended
+    input = [concatenated_multiattended_features]
     '''
-    def __init__(self, ch_in, ch_out,mode='add', **kwargs):
-        super(ResidualCombine1D, self).__init__(**kwargs)        
-        self.text_channels = ch_in 
+    def __init__(self, ch_in, ch_out, **kwargs):
+        super(CondenseAttention2D, self).__init__(**kwargs)        
+        self.image_channels = ch_in 
         self.filters_o = ch_out
-        self.method = mode
     def build(self, input_shape):
-        kernel_shape_o = (1, self.text_channels, self.filters_o)        
-        self.gamma1 = self.add_weight(name='gamma1', shape=[1], initializer='ones', trainable=True)
-        self.gamma2 = self.add_weight(name='gamma2', shape=[1], initializer='ones', trainable=True)        
+        kernel_shape_o = (1,1) + (self.image_channels, self.filters_o)         
         self.kernel_o = self.add_weight(shape=kernel_shape_o,
                                         initializer='glorot_uniform',
                                         name='kernel_o', trainable=True)
         self.bias_o = self.add_weight(shape=(self.filters_o,),
                                       initializer='zeros',
                                       name='bias_o', trainable=True)
-        super(ResidualCombine1D, self).build(input_shape)
+        super(CondenseAttention2D, self).build(input_shape)
     def call(self, inputs):
-        prev_layer, multihead_attended = inputs
+        multihead_attended = inputs
+        o = K.conv2d(multihead_attended,
+                     kernel=self.kernel_o,
+                     strides=(1,1), padding='same')
+        o = K.bias_add(o, self.bias_o)
+        self.o_sh = tuple(o.shape.as_list())
+        return o
+    def compute_output_shape(self, input_shape):
+        return self.o_sh    
+    
+    
+class CondenseAttention1D(Layer):
+    def __init__(self, ch_in, ch_out, **kwargs):
+        super(CondenseAttention1D, self).__init__(**kwargs)        
+        self.text_channels = ch_in 
+        self.filters_o = ch_out
+    def build(self, input_shape):
+        kernel_shape_o = (1, self.text_channels, self.filters_o)        
+        self.kernel_o = self.add_weight(shape=kernel_shape_o,
+                                        initializer='glorot_uniform',
+                                        name='kernel_o', trainable=True)
+        self.bias_o = self.add_weight(shape=(self.filters_o,),
+                                      initializer='zeros',
+                                      name='bias_o', trainable=True)
+        super(CondenseAttention1D, self).build(input_shape)
+    def call(self, inputs):
+        multihead_attended = inputs
         o = K.conv1d(multihead_attended,
                      kernel=self.kernel_o,
                      strides=(1,), padding='same')
         o = K.bias_add(o, self.bias_o)
-#         o = kl.ELU(alpha=1.0)(o)
-        
+        self.o_sh = tuple(o.shape.as_list())
+        return o
+    def compute_output_shape(self, input_shape):
+        return self.o_sh
+
+class ResidualCombine(Layer):    
+    '''
+    [previous_layer_features, attended_features]
+    Concat attention features with previous layer features
+    Use scalar gamma for weighted concatenation
+    gamma1=>residual
+    gamma2=>attended
+    '''
+    def __init__(self,**kwargs):
+        super(ResidualCombine, self).__init__(**kwargs)
+    def build(self, input_shape):
+        self.gamma1 = self.add_weight(name='gamma1', shape=[1], initializer='ones', trainable=True)
+        self.gamma2 = self.add_weight(name='gamma2', shape=[1], initializer='ones', trainable=True)
+        super(ResidualCombine, self).build(input_shape)        
+    def call(self, inputs):
+        prev_layer, multi_attn = inputs
         prev_layer = self.gamma1 * prev_layer 
-#         print('x_text.shape:',x_text,x_text.shape)
-        multihead_attended = self.gamma2 * o
-#         print('x_att.shape:',x_att,x_att.shape)
-        x_out = kl.Concatenate(axis=-1)([prev_layer,multihead_attended])
-    
+        multi_attn = self.gamma2 * multi_attn        
+        x_out = kl.Concatenate(axis=-1)([prev_layer,multi_attn])    
         self.out_sh = tuple(x_out.shape.as_list())
         return [x_out, self.gamma1, self.gamma2]
-    def compute_output_shape(self, input_shape):
+    def compute_output_shape(self,input_shape):
         return [self.out_sh, tuple(self.gamma1.shape.as_list()), tuple(self.gamma2.shape.as_list())]
+
+        
 class Text2ImgCA(Layer):
     def __init__(self, img_ch, text_ch, **kwargs):
         '''
@@ -294,17 +332,17 @@ class Text2ImgCA(Layer):
                      kernel=self.kernel_q,
                      strides=(1,), padding='same')
         q = K.bias_add(q, self.bias_q) 
-        q = kl.ELU(alpha=1.0)(q)
+#         q = kl.ELU(alpha=1.0)(q)
         k = K.conv2d(x2,
                      kernel=self.kernel_k,
                      strides=(1,1), padding='same')
         k = K.bias_add(k, self.bias_k)
-        k = kl.ELU(alpha=1.0)(k)
+#         k = kl.ELU(alpha=1.0)(k)
         v = K.conv2d(x2,
                      kernel=self.kernel_v,
                      strides=(1,1), padding='same')
         v = K.bias_add(v, self.bias_v)
-        v = kl.ELU(alpha=1.0)(v)
+#         v = kl.ELU(alpha=1.0)(v)
 #         print('q.shape,k.shape,v.shape,',q.shape,k.shape,v.shape)
         s = K.batch_dot(q, K.permute_dimensions(hw_flatten(k), (0,2,1)))  # # [bs, N, M]
                         
@@ -322,7 +360,7 @@ class Text2ImgCA(Layer):
                      kernel=self.kernel_o,
                      strides=(1,), padding='same')
         o = K.bias_add(o, self.bias_o)
-        o = kl.ELU(alpha=1.0)(o)
+#         o = kl.ELU(alpha=1.0)(o)
 #         print('o.shape:',o.shape)
 #         x_text = self.gamma1 * x1 
 # #         print('x_text.shape:',x_text,x_text.shape)
@@ -337,50 +375,7 @@ class Text2ImgCA(Layer):
 #         print(input_shape)
         return [self.out_sh, self.beta_shape]#, tuple(self.gamma1.shape.as_list()), tuple(self.gamma2.shape.as_list())]
 
-class ResidualCombine2D(Layer):
-    '''
-    [previous_layer, concatenated_,multiattended_output]
-    Combine multple heads and concat with previous layer
-    Use scalar gamma for weighted concatenation
-    gamma1=>residual
-    gamma2=>attended
-    '''
-    def __init__(self, ch_in, ch_out,mode='add', **kwargs):
-        super(ResidualCombine2D, self).__init__(**kwargs)        
-        self.image_channels = ch_in 
-        self.filters_o = ch_out
-        self.method = mode
-    def build(self, input_shape):
-        kernel_shape_o = (1,1) + (self.image_channels, self.filters_o)        
-        self.gamma1 = self.add_weight(name='gamma1', shape=[1], initializer='ones', trainable=True)
-        self.gamma2 = self.add_weight(name='gamma2', shape=[1], initializer='ones', trainable=True)        
-        self.kernel_o = self.add_weight(shape=kernel_shape_o,
-                                        initializer='glorot_uniform',
-                                        name='kernel_o', trainable=True)
-        self.bias_o = self.add_weight(shape=(self.filters_o,),
-                                      initializer='zeros',
-                                      name='bias_o', trainable=True)
-        super(ResidualCombine2D, self).build(input_shape)
-    def call(self, inputs):
-        prev_layer, multihead_attended = inputs
-        o = K.conv2d(multihead_attended,
-                     kernel=self.kernel_o,
-                     strides=(1,1), padding='same')
-        o = K.bias_add(o, self.bias_o)
-        o = kl.ELU(alpha=1.0)(o)
-#         print(o.shape)
-        prev_layer = self.gamma1 * prev_layer 
-#         print(prev_layer.shape)
-#         print('x_text.shape:',x_text,x_text.shape)
-        multihead_attended = self.gamma2 * o
-#         print(multihead_attended.shape)
-#         print('x_att.shape:',x_att,x_att.shape)
-        x_out = kl.Concatenate(axis=-1)([prev_layer,multihead_attended])
-        
-        self.out_sh = tuple(x_out.shape.as_list())
-        return [x_out, self.gamma1, self.gamma2]
-    def compute_output_shape(self, input_shape):
-        return [self.out_sh, tuple(self.gamma1.shape.as_list()), tuple(self.gamma2.shape.as_list())]
+
 
 class Img2TextCA(Layer):
     def __init__(self, img_ch, text_ch, **kwargs):
@@ -449,17 +444,17 @@ class Img2TextCA(Layer):
                      kernel=self.kernel_q,
                      strides=(1,1), padding='same')
         q = K.bias_add(q, self.bias_q)
-        q = kl.ELU(alpha=1.0)(q)
+#         q = kl.ELU(alpha=1.0)(q)
         k = K.conv1d(x2,
                      kernel=self.kernel_k,
                      strides=(1,), padding='same')
         k = K.bias_add(k, self.bias_k)
-        k = kl.ELU(alpha=1.0)(k)
+#         k = kl.ELU(alpha=1.0)(k)
         v = K.conv1d(x2,
                      kernel=self.kernel_v,
                      strides=(1,), padding='same')
         v = K.bias_add(v, self.bias_v)
-        v = kl.ELU(alpha=1.0)(v)
+#         v = kl.ELU(alpha=1.0)(v)
 #         print('q.shape,k.shape,v.shape,',q.shape,k.shape,v.shape)
         s = K.batch_dot(hw_flatten(q), K.permute_dimensions(k,(0,2,1)))  # # [bs, N, M]
 #         print(s.shape)
@@ -481,7 +476,7 @@ class Img2TextCA(Layer):
                      kernel=self.kernel_o,
                      strides=(1,1), padding='same')
         o = K.bias_add(o, self.bias_o)
-        o = kl.ELU(alpha=1.0)(o)
+#         o = kl.ELU(alpha=1.0)(o)
 #         print('o.shape:',o.shape)
 #         x_text = self.gamma1 * x1 
 # #         print('x_text.shape:',x_text,x_text.shape)
