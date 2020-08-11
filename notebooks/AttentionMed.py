@@ -1,22 +1,25 @@
 import keras.backend as K
 import keras.layers as kl
 from keras.layers import Layer,InputSpec,Conv1D 
-
+from keras import regularizers, constraints, initializers, activations
+from keras.layers.recurrent import Recurrent
+import tensorflow as tf
 
     
 class Attention(Layer):
-    def __init__(self, ch, **kwargs):
+    def __init__(self,timesteps, ch, **kwargs):
         super(Attention, self).__init__(**kwargs)
         self.channels = ch
-        self.filters_q_k = self.channels // 8        
+        self.timesteps = timesteps
+        self.filters_q_k = self.channels       
         self.filters_v = self.channels
         
 
     def build(self, input_shape):
 #         print('build input_shape:',input_shape)
-        kernel_shape_q_k = (1, self.channels, self.filters_q_k)
+        kernel_shape_q_k = (self.timesteps, self.channels, self.filters_q_k)
 #         print('kernel_shape_q_k:',kernel_shape_q_k)
-        kernel_shape_v = (1, self.channels, self.filters_v)
+        kernel_shape_v = (self.timesteps, self.channels, self.filters_v)
 #         print('kernel_shape_v:',kernel_shape_v)
         self.N = input_shape[1]  
 #         print('self.N:',self.N)
@@ -59,16 +62,20 @@ class Attention(Layer):
                      kernel=self.kernel_q,
                      strides=(1,), padding='same')
         q = K.bias_add(q, self.bias_q)
-#         q = kl.Activation('relu')(q)
+#         q = kl.BatchNormalization()(q)
+        q = kl.Activation('relu')(q)
         k = K.conv1d(x,
                      kernel=self.kernel_k,
                      strides=(1,), padding='same')
         k = K.bias_add(k, self.bias_k)
-#         k = kl.Activation('relu')(k)
+#         k = kl.BatchNormalization()(k)
+        k = kl.Activation('relu')(k)
         v = K.conv1d(x,
                      kernel=self.kernel_v,
                      strides=(1,), padding='same')
         v = K.bias_add(v, self.bias_v)
+#         v = kl.BatchNormalization()(v)
+        v = kl.Activation('relu')(v)
 #         v = kl.ELU(alpha=1.0)(v)
 #         print('q.shape,k.shape,v.shape,',q.shape,k.shape,v.shape)
         s = K.batch_dot(q, K.permute_dimensions(k,(0,2,1)))  # # [bs, 1, N]
@@ -79,11 +86,14 @@ class Attention(Layer):
 #         print('beta.shape:',beta.shape)
         
         o = K.batch_dot(beta, v)  # [bs, 1, C]
+        
 #         print('o.shape:',o.shape)
         o = K.conv1d(o,
                      kernel=self.kernel_o,
                      strides=(1,), padding='same')
         o = K.bias_add(o, self.bias_o)
+#         o = kl.BatchNormalization()(o)
+        o = kl.Activation('relu')(o)
 #         o = kl.ELU(alpha=1.0)(o)
 #         print('o.shape:',o.shape)
 #         o = K.reshape(o, shape=K.shape(x))  # [bs, h, w, C]
@@ -140,31 +150,36 @@ class SelfAttention(Layer):
 
 
     def call(self, inputs):
-        x,masks = inputs
-        if masks is not None:
-            self.padding_masks = masks
+        if type(inputs)==type([]):
+            x,masks = inputs
+        else:
+            x,masks = inputs,None
         q = K.conv1d(x,
                      kernel=self.kernel_q,
                      strides=(1,), padding='same')
         q = K.bias_add(q, self.bias_q)
+        q = kl.Activation('relu')(q)
+        
 #         q = kl.ELU(alpha=1.0)(q)
         
         k = K.conv1d(x,
                      kernel=self.kernel_k,
                      strides=(1,), padding='same')
         k = K.bias_add(k, self.bias_k)
+        k = kl.Activation('relu')(k)
 #         k = kl.ELU(alpha=1.0)(k)
         
         v = K.conv1d(x,
                      kernel=self.kernel_v,
                      strides=(1,), padding='same')
         v = K.bias_add(v, self.bias_v)
+        v = kl.Activation('relu')(v)
 #         v = kl.ELU(alpha=1.0)(v)
 #         print('q.shape,k.shape,v.shape,',q.shape,k.shape,v.shape)
         s = K.batch_dot(q, K.permute_dimensions(k,(0,2,1)))  # # [bs, N, N]
        
-        if self.padding_masks is not None:
-            s = kl.Multiply()([s,self.padding_masks])
+        if masks is not None:
+            s = kl.Multiply()([s,masks])
 #         print('s.shape:',s.shape)
         beta = K.softmax(s, axis=-1)  # attention map
         self.beta_shape = tuple(beta.shape[1:].as_list())
@@ -177,6 +192,7 @@ class SelfAttention(Layer):
                      kernel=self.kernel_o,
                      strides=(1,), padding='same')
         o = K.bias_add(o, self.bias_o)
+        o = kl.Activation('relu')(o)
 #         o = kl.ELU(alpha=1.0)(o)
 #         x = x + self.gamma * o 
 #         print('x.shape:',x.shape)
@@ -209,6 +225,7 @@ class CondenseAttention2D(Layer):
                      kernel=self.kernel_o,
                      strides=(1,1), padding='same')
         o = K.bias_add(o, self.bias_o)
+        o = kl.Activation('relu')(o)
         self.o_sh = tuple(o.shape.as_list())
         return o
     def compute_output_shape(self, input_shape):
@@ -235,6 +252,7 @@ class CondenseAttention1D(Layer):
                      kernel=self.kernel_o,
                      strides=(1,), padding='same')
         o = K.bias_add(o, self.bias_o)
+        o = kl.Activation('relu')(o)
         self.o_sh = tuple(o.shape.as_list())
         return o
     def compute_output_shape(self, input_shape):
@@ -248,17 +266,23 @@ class ResidualCombine(Layer):
     gamma1=>residual
     gamma2=>attended
     '''
-    def __init__(self,**kwargs):
+    def __init__(self,method,**kwargs):
         super(ResidualCombine, self).__init__(**kwargs)
+        self.method = method
     def build(self, input_shape):
         self.gamma1 = self.add_weight(name='gamma1', shape=[1], initializer='ones', trainable=True)
         self.gamma2 = self.add_weight(name='gamma2', shape=[1], initializer='ones', trainable=True)
         super(ResidualCombine, self).build(input_shape)        
     def call(self, inputs):
         prev_layer, multi_attn = inputs
-        prev_layer = self.gamma1 * prev_layer 
-        multi_attn = self.gamma2 * multi_attn        
-        x_out = kl.Concatenate(axis=-1)([prev_layer,multi_attn])    
+        g1 = kl.Activation('relu')(self.gamma1)
+        g2 = kl.Activation('relu')(self.gamma2)
+        prev_layer = g1 * prev_layer 
+        multi_attn = g2 * multi_attn   
+        if self.method == 'concat':
+            x_out = kl.Concatenate(axis=-1)([prev_layer,multi_attn])    
+        elif self.method == 'add':
+            x_out = kl.Add()([prev_layer,multi_attn])    
         self.out_sh = tuple(x_out.shape.as_list())
         return [x_out, self.gamma1, self.gamma2]
     def compute_output_shape(self,input_shape):
@@ -360,7 +384,7 @@ class Text2ImgCA(Layer):
                      kernel=self.kernel_o,
                      strides=(1,), padding='same')
         o = K.bias_add(o, self.bias_o)
-#         o = kl.ELU(alpha=1.0)(o)
+        o = kl.ELU(alpha=1.0)(o)
 #         print('o.shape:',o.shape)
 #         x_text = self.gamma1 * x1 
 # #         print('x_text.shape:',x_text,x_text.shape)
@@ -490,3 +514,5 @@ class Img2TextCA(Layer):
     def compute_output_shape(self, input_shape):
 #         print(input_shape)
         return [self.out_sh, self.beta_shape]#, tuple(self.gamma1.shape.as_list()), tuple(self.gamma2.shape.as_list())]
+
+
