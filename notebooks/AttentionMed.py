@@ -177,11 +177,11 @@ class SelfAttention(Layer):
 #         v = kl.ELU(alpha=1.0)(v)
 #         print('q.shape,k.shape,v.shape,',q.shape,k.shape,v.shape)
         s = K.batch_dot(q, K.permute_dimensions(k,(0,2,1)))  # # [bs, N, N]
-       
-        if masks is not None:
-            s = kl.Multiply()([s,masks])
-#         print('s.shape:',s.shape)
         beta = K.softmax(s, axis=-1)  # attention map
+        if masks is not None:
+            beta = kl.Multiply()([beta,masks])
+#         print('s.shape:',s.shape)
+        
         self.beta_shape = tuple(beta.shape[1:].as_list())
 #         print('beta.shape:',beta.shape.as_list())
         o = K.batch_dot(beta, v)  # [bs, N, C]
@@ -369,11 +369,11 @@ class Text2ImgCA(Layer):
 #         v = kl.ELU(alpha=1.0)(v)
 #         print('q.shape,k.shape,v.shape,',q.shape,k.shape,v.shape)
         s = K.batch_dot(q, K.permute_dimensions(hw_flatten(k), (0,2,1)))  # # [bs, N, M]
-                        
+        beta = K.softmax(s, axis=-1)  # attention map                
         if self.padding_masks is not None:
-            s = kl.Multiply()([s,self.padding_masks])
+            beta = kl.Multiply()([beta,self.padding_masks])
 #         print('s.shape:',s.shape)
-        beta = K.softmax(s, axis=-1)  # attention map
+        
                         
         self.beta_shape = tuple(beta.shape[1:].as_list())
 #         print('hw_flatten(v).shape:',hw_flatten(v).shape)
@@ -482,14 +482,15 @@ class Img2TextCA(Layer):
 #         print('q.shape,k.shape,v.shape,',q.shape,k.shape,v.shape)
         s = K.batch_dot(hw_flatten(q), K.permute_dimensions(k,(0,2,1)))  # # [bs, N, M]
 #         print(s.shape)
+        beta = K.softmax(s, axis=-1)  # attention map
         if self.padding_masks is not None:
-            s = K.permute_dimensions(x=s,pattern=(0,2,1))
+            beta = K.permute_dimensions(x=beta,pattern=(0,2,1))
 #             print(s.shape)
-            s = kl.Multiply()([s,self.padding_masks])
-            s = K.permute_dimensions(x=s,pattern=(0,2,1))
+            beta = kl.Multiply()([beta,self.padding_masks])
+            beta = K.permute_dimensions(x=beta,pattern=(0,2,1))
 #             print(s.shape)
 #         print('s.shape:',s.shape)
-        beta = K.softmax(s, axis=-1)  # attention map
+        
         self.beta_shape = tuple(beta.shape[1:].as_list())
 #         print('hw_flatten(v).shape:',hw_flatten(v).shape)
         o = K.batch_dot(beta, v)  # [bs, N, C]
