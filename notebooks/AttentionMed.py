@@ -115,34 +115,34 @@ class SelfAttention(Layer):
         self.filters_v = self.channels
         
     def build(self, input_shape):
-        kernel_shape_q_k = (1, self.channels, self.filters_q_k)
-        kernel_shape_v = (1, self.channels, self.filters_v)
-        self.N = input_shape[1]        
-#         self.gamma = self.add_weight(name='sa_gamma', shape=[1], initializer='zeros', trainable=True)
-        self.kernel_q = self.add_weight(shape=kernel_shape_q_k,
-                                        initializer='glorot_uniform',
-                                        name='kernel_q', trainable=True)
-        self.kernel_k = self.add_weight(shape=kernel_shape_q_k,
-                                        initializer='glorot_uniform',
-                                        name='kernel_k', trainable=True)
-        self.kernel_v = self.add_weight(shape=kernel_shape_v,
-                                        initializer='glorot_uniform',
-                                        name='kernel_v', trainable=True)
-        self.kernel_o = self.add_weight(shape=kernel_shape_v,
-                                        initializer='glorot_uniform',
-                                        name='kernel_o', trainable=True)
-        self.bias_q = self.add_weight(shape=(self.filters_q_k,),
-                                      initializer='zeros',
-                                      name='bias_q', trainable=True)
-        self.bias_k = self.add_weight(shape=(self.filters_q_k,),
-                                      initializer='zeros',
-                                      name='bias_k', trainable=True)
-        self.bias_v = self.add_weight(shape=(self.filters_v,),
-                                      initializer='zeros',
-                                      name='bias_v', trainable=True)
-        self.bias_o = self.add_weight(shape=(self.filters_v,),
-                                      initializer='zeros',
-                                      name='bias_o', trainable=True)
+#         kernel_shape_q_k = (1, self.channels, self.filters_q_k)
+#         kernel_shape_v = (1, self.channels, self.filters_v)
+#         self.N = input_shape[1]        
+# #         self.gamma = self.add_weight(name='sa_gamma', shape=[1], initializer='zeros', trainable=True)
+#         self.kernel_q = self.add_weight(shape=kernel_shape_q_k,
+#                                         initializer='glorot_uniform',
+#                                         name='kernel_q', trainable=True)
+#         self.kernel_k = self.add_weight(shape=kernel_shape_q_k,
+#                                         initializer='glorot_uniform',
+#                                         name='kernel_k', trainable=True)
+#         self.kernel_v = self.add_weight(shape=kernel_shape_v,
+#                                         initializer='glorot_uniform',
+#                                         name='kernel_v', trainable=True)
+#         self.kernel_o = self.add_weight(shape=kernel_shape_v,
+#                                         initializer='glorot_uniform',
+#                                         name='kernel_o', trainable=True)
+#         self.bias_q = self.add_weight(shape=(self.filters_q_k,),
+#                                       initializer='zeros',
+#                                       name='bias_q', trainable=True)
+#         self.bias_k = self.add_weight(shape=(self.filters_q_k,),
+#                                       initializer='zeros',
+#                                       name='bias_k', trainable=True)
+#         self.bias_v = self.add_weight(shape=(self.filters_v,),
+#                                       initializer='zeros',
+#                                       name='bias_v', trainable=True)
+#         self.bias_o = self.add_weight(shape=(self.filters_v,),
+#                                       initializer='zeros',
+#                                       name='bias_o', trainable=True)
         super(SelfAttention, self).build(input_shape)
 #         self.input_spec = InputSpec(ndim=3,
 #                                     axes={2: input_shape[-1]})
@@ -154,53 +154,57 @@ class SelfAttention(Layer):
             x,masks = inputs
         else:
             x,masks = inputs,None
-        q = K.conv1d(x,
-                     kernel=self.kernel_q,
-                     strides=(1,), padding='same')
-        q = K.bias_add(q, self.bias_q)
+        q = kl.Dense(self.filters_q_k)(x)
         q = kl.Activation('relu')(q)
-        
 #         q = kl.ELU(alpha=1.0)(q)
-        
-        k = K.conv1d(x,
-                     kernel=self.kernel_k,
-                     strides=(1,), padding='same')
-        k = K.bias_add(k, self.bias_k)
+#         K.print_tensor(q, message= "q values=")
+    
+        k = kl.Dense(self.filters_q_k)(x)
         k = kl.Activation('relu')(k)
 #         k = kl.ELU(alpha=1.0)(k)
-        
-        v = K.conv1d(x,
-                     kernel=self.kernel_v,
-                     strides=(1,), padding='same')
-        v = K.bias_add(v, self.bias_v)
+#         K.print_tensor(k, message= "k values=")
+    
+        v = kl.Dense(self.filters_v)(x)
         v = kl.Activation('relu')(v)
 #         v = kl.ELU(alpha=1.0)(v)
-#         print('q.shape,k.shape,v.shape,',q.shape,k.shape,v.shape)
-        s = K.batch_dot(q, K.permute_dimensions(k,(0,2,1)))  # # [bs, N, N]
-        beta = K.softmax(s, axis=-1)  # attention map
+#         K.print_tensor(v, message= "v values=")
+    
+        s = K.batch_dot(q, K.permute_dimensions(k,(0,2,1)))  # # [bs, N, N]        
+#         K.print_tensor(s, message="s values=")
+        
+
+        
         if masks is not None:
-            beta = kl.Multiply()([beta,masks])
+            print('apply padding')
+            beta = kl.Multiply()([s,masks])
+        else:
+            beta = s
 #         print('s.shape:',s.shape)
         
-        self.beta_shape = tuple(beta.shape[1:].as_list())
+        scores = K.softmax(beta, axis=-1)  # attention map
+#         K.print_tensor(b, message= "b values=")
 #         print('beta.shape:',beta.shape.as_list())
-        o = K.batch_dot(beta, v)  # [bs, N, C]
+        o = K.batch_dot(scores, v)  # [bs, N, C]
 #         print('o.shape:',o.shape)
 #         o = K.reshape(o, shape=K.shape(x))  # [bs, h, w, C]
-
-        o = K.conv1d(o,
-                     kernel=self.kernel_o,
-                     strides=(1,), padding='same')
-        o = K.bias_add(o, self.bias_o)
-        o = kl.Activation('relu')(o)
+        
 #         o = kl.ELU(alpha=1.0)(o)
+#         K.print_tensor(o, message="o values=")
+    
 #         x = x + self.gamma * o 
 #         print('x.shape:',x.shape)
-        self.out_sh = tuple(o.shape.as_list())
-        return [o, beta]#, self.gamma]
+        self.x_sh = tuple(x.shape.as_list())
+        self.q_sh = tuple(q.shape.as_list())
+        self.k_sh = tuple(k.shape.as_list())
+        self.v_sh = tuple(v.shape.as_list())
+        self.s_sh = tuple(s.shape.as_list())
+        self.scores_sh = tuple(scores.shape.as_list())
+        self.beta_sh = tuple(beta.shape.as_list())
+        self.o_sh = tuple(o.shape.as_list())
+        return [x,q,k,v,s,scores,beta,o]#, self.gamma]
 
     def compute_output_shape(self, input_shape):
-        return [self.out_sh,self.beta_shape]#, tuple(self.gamma.shape.as_list())]
+        return [self.x_sh,self.q_sh,self.k_sh,self.v_sh,self.s_sh,self.scores_sh,self.beta_sh,self.o_sh]#, tuple(self.gamma.shape.as_list())]
 
 class CondenseAttention2D(Layer):
     '''
@@ -238,20 +242,17 @@ class CondenseAttention1D(Layer):
         self.text_channels = ch_in 
         self.filters_o = ch_out
     def build(self, input_shape):
-        kernel_shape_o = (1, self.text_channels, self.filters_o)        
-        self.kernel_o = self.add_weight(shape=kernel_shape_o,
-                                        initializer='glorot_uniform',
-                                        name='kernel_o', trainable=True)
-        self.bias_o = self.add_weight(shape=(self.filters_o,),
-                                      initializer='zeros',
-                                      name='bias_o', trainable=True)
+#         kernel_shape_o = (1, self.text_channels, self.filters_o)        
+#         self.kernel_o = self.add_weight(shape=kernel_shape_o,
+#                                         initializer='glorot_uniform',
+#                                         name='kernel_o', trainable=True)
+#         self.bias_o = self.add_weight(shape=(self.filters_o,),
+#                                       initializer='zeros',
+#                                       name='bias_o', trainable=True)
         super(CondenseAttention1D, self).build(input_shape)
     def call(self, inputs):
         multihead_attended = inputs
-        o = K.conv1d(multihead_attended,
-                     kernel=self.kernel_o,
-                     strides=(1,), padding='same')
-        o = K.bias_add(o, self.bias_o)
+        o = kl.Dense(self.filters_o)(multihead_attended)
         o = kl.Activation('relu')(o)
         self.o_sh = tuple(o.shape.as_list())
         return o
