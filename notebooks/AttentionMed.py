@@ -6,6 +6,8 @@ from keras import regularizers, constraints, initializers, activations
 import tensorflow as tf
 import numpy as np
     
+activation='relu'
+
 class Attention(Layer):
     def __init__(self, ch, **kwargs):
         super(Attention, self).__init__(**kwargs)
@@ -26,16 +28,16 @@ class Attention(Layer):
             h = K.expand_dims(axis=1,x=h)
 
 #         print(x)
-        q = kl.Dense(self.filters_q_k)(h)
-        q = kl.Activation('relu')(q)
+        q = kl.Dense(self.filters_q_k,use_bias=True)(h)
+        q = kl.Activation(activation)(q)
 #         print('attn: q.shape:{0}'.format(q.shape))
         
-        k = kl.Dense(self.filters_q_k)(x)
-        k = kl.Activation('relu')(k)
+        k = kl.Dense(self.filters_q_k,use_bias=True)(x)
+        k = kl.Activation(activation)(k)
         
-        v = kl.Dense(self.filters_v)(x)
-        v = kl.Activation('relu')(v)
-#         v = kl.ELU(alpha=1.0)(v)
+        v = kl.Dense(self.filters_v,use_bias=True)(x)
+        v = kl.Activation(activation)(v)
+#         v = kl.tanh(alpha=1.0)(v)
 #         print('q.shape,k.shape,v.shape,',q.shape,k.shape,v.shape)
         s = K.batch_dot(q, K.permute_dimensions(k,(0,2,1)))  # # [bs, 1, N]
     
@@ -98,31 +100,30 @@ class SelfAttention(Layer):
             x,masks = inputs
         else:
             x,masks = inputs,None
-        q = kl.Dense(self.filters_q_k)(x)
-        q = kl.Activation('relu')(q)
-#         q = kl.ELU(alpha=1.0)(q)
+        q = kl.Dense(self.filters_q_k,use_bias=True)(x)
+        q = kl.Activation(activation)(q)
+#         q = kl.tanh(alpha=1.0)(q)
 #         K.print_tensor(q, message= "q values=")
     
-        k = kl.Dense(self.filters_q_k)(x)
-        k = kl.Activation('relu')(k)
-#         k = kl.ELU(alpha=1.0)(k)
+        k = kl.Dense(self.filters_q_k,use_bias=True)(x)
+        k = kl.Activation(activation)(k)
+#         k = kl.tanh(alpha=1.0)(k)
 #         K.print_tensor(k, message= "k values=")
     
-        v = kl.Dense(self.filters_v)(x)
-        v = kl.Activation('relu')(v)
-#         v = kl.ELU(alpha=1.0)(v)
+        v = kl.Dense(self.filters_v,use_bias=True)(x)
+        v = kl.Activation(activation)(v)
+#         v = kl.tanh(alpha=1.0)(v)
 #         K.print_tensor(v, message= "v values=")
     
-        s = K.batch_dot(q, K.permute_dimensions(k,(0,2,1)))  # # [bs, N, N]        
+        beta = K.batch_dot(q, K.permute_dimensions(k,(0,2,1)))  # # [bs, N, N]        
 #         K.print_tensor(s, message="s values=")
         
 
         
         if masks is not None:
 #             print('apply padding')
-            beta = kl.Multiply()([s,masks])
-        else:
-            beta = s
+            beta = kl.Multiply()([beta,masks])
+    
 #         print('s.shape:',s.shape)
         
         scores = K.softmax(beta, axis=-1)  # attention map
@@ -132,7 +133,7 @@ class SelfAttention(Layer):
 #         print('o.shape:',o.shape)
 #         o = K.reshape(o, shape=K.shape(x))  # [bs, h, w, C]
         
-#         o = kl.ELU(alpha=1.0)(o)
+#         o = kl.tanh(alpha=1.0)(o)
 #         K.print_tensor(o, message="o values=")
     
 #         x = x + self.gamma * o 
@@ -141,14 +142,25 @@ class SelfAttention(Layer):
         self.q_sh = tuple(q.shape.as_list())
         self.k_sh = tuple(k.shape.as_list())
         self.v_sh = tuple(v.shape.as_list())
-        self.s_sh = tuple(s.shape.as_list())
-        self.scores_sh = tuple(scores.shape.as_list())
         self.beta_sh = tuple(beta.shape.as_list())
+        self.scores_sh = tuple(scores.shape.as_list())
         self.o_sh = tuple(o.shape.as_list())
-        return [x,q,k,v,s,scores,beta,o]#, self.gamma]
+        return [x
+                ,q
+                ,k
+                ,v
+                ,beta
+                ,scores
+                ,o]#, self.gamma]
 
     def compute_output_shape(self, input_shape):
-        return [self.x_sh,self.q_sh,self.k_sh,self.v_sh,self.s_sh,self.scores_sh,self.beta_sh,self.o_sh]#, tuple(self.gamma.shape.as_list())]
+        return [self.x_sh
+                ,self.q_sh
+                ,self.k_sh
+                ,self.v_sh
+                ,self.beta_sh
+                ,self.scores_sh
+                ,self.o_sh]#, tuple(self.gamma.shape.as_list())]
 
 class CondenseAttention2D(Layer):
     '''
@@ -173,7 +185,7 @@ class CondenseAttention2D(Layer):
                      kernel=self.kernel_o,
                      strides=(1,1), padding='same')
         o = K.bias_add(o, self.bias_o)
-        o = kl.Activation('relu')(o)
+        o = kl.Activation(activation)(o)
         self.o_sh = tuple(o.shape.as_list())
         return o
     def compute_output_shape(self, input_shape):
@@ -196,8 +208,8 @@ class CondenseAttention1D(Layer):
         super(CondenseAttention1D, self).build(input_shape)
     def call(self, inputs):
         multihead_attended = inputs
-        o = kl.Dense(self.filters_o)(multihead_attended)
-        o = kl.Activation('relu')(o)
+        o = kl.Dense(self.filters_o,use_bias=True)(multihead_attended)
+        o = kl.Activation(activation)(o)
         self.o_sh = tuple(o.shape.as_list())
         return o
     def compute_output_shape(self, input_shape):
@@ -223,8 +235,8 @@ class ResidualCombine(Layer):
         prev_layer_exp = K.expand_dims(axis=-1,x=prev_layer)
         multi_attn_exp = K.expand_dims(axis=-1,x=multi_attn)
         
-        gamma1 = kl.Dense(1)
-        gamma2 = kl.Dense(1)
+        gamma1 = kl.Dense(1,use_bias=True)
+        gamma2 = kl.Dense(1,use_bias=True)
         
         prev_layer_exp = gamma1(prev_layer_exp)
         multi_attn_exp = gamma2(multi_attn_exp)
@@ -232,8 +244,8 @@ class ResidualCombine(Layer):
 #         g2_weight = tf.convert_to_tensor(gamma2.get_weights()[0][0])
         
         # instead of multiplying gamma weights we can do this
-        prev_layer = K.squeeze(x=kl.Activation('relu')(prev_layer_exp),axis=-1)
-        multi_attn = K.squeeze(x=kl.Activation('relu')(multi_attn_exp),axis=-1)
+        prev_layer = K.squeeze(x=kl.Activation(activation)(prev_layer_exp),axis=-1)
+        multi_attn = K.squeeze(x=kl.Activation(activation)(multi_attn_exp),axis=-1)
         
         if self.method == 'concat':
             x_out = kl.Concatenate(axis=-1)([prev_layer,multi_attn])    
@@ -313,15 +325,15 @@ class Text2ImgCA(Layer):
         if masks is not None:
             self.masks = masks
 #         self.text_input_shape = tuple(x1.shape[1:].as_list())
-        q = kl.Dense(self.filters_q)(text)
-        q = kl.Activation('relu')(q)
-#         q = kl.ELU(alpha=1.0)(q)
+        q = kl.Dense(self.filters_q,use_bias=True)(text)
+        q = kl.Activation(activation)(q)
+#         q = kl.tanh(alpha=1.0)(q)
         k = kl.Conv2D(filters=self.filters_k,strides=(1,1),kernel_size=(1,1), padding='same')(img)
-        k = kl.Activation('relu')(k)
-#         k = kl.ELU(alpha=1.0)(k)
+        k = kl.Activation(activation)(k)
+#         k = kl.tanh(alpha=1.0)(k)
         v = kl.Conv2D(filters=self.filters_v,strides=(1,1),kernel_size=(1,1), padding='same')(img)
-        v = kl.Activation('relu')(v)
-#         v = kl.ELU(alpha=1.0)(v)
+        v = kl.Activation(activation)(v)
+#         v = kl.tanh(alpha=1.0)(v)
 #         print('q.shape,k.shape,v.shape,',q.shape,k.shape,v.shape)
         s = K.batch_dot(q, K.permute_dimensions(hw_flatten(k), (0,2,1)))  # # [bs, N, M]
                       
@@ -341,7 +353,7 @@ class Text2ImgCA(Layer):
 #                      kernel=self.kernel_o,
 #                      strides=(1,), padding='same')
 #         o = K.bias_add(o, self.bias_o)
-#         o = kl.ELU(alpha=1.0)(o)
+#         o = kl.tanh(alpha=1.0)(o)
 #         print('o.shape:',o.shape)
 #         x_text = self.gamma1 * x1 
 # #         print('x_text.shape:',x_text,x_text.shape)
@@ -433,17 +445,17 @@ class Img2TextCA(Layer):
                      kernel=self.kernel_q,
                      strides=(1,1), padding='same')
         q = K.bias_add(q, self.bias_q)
-#         q = kl.ELU(alpha=1.0)(q)
+#         q = kl.tanh(alpha=1.0)(q)
         k = K.conv1d(x2,
                      kernel=self.kernel_k,
                      strides=(1,), padding='same')
         k = K.bias_add(k, self.bias_k)
-#         k = kl.ELU(alpha=1.0)(k)
+#         k = kl.tanh(alpha=1.0)(k)
         v = K.conv1d(x2,
                      kernel=self.kernel_v,
                      strides=(1,), padding='same')
         v = K.bias_add(v, self.bias_v)
-#         v = kl.ELU(alpha=1.0)(v)
+#         v = kl.tanh(alpha=1.0)(v)
 #         print('q.shape,k.shape,v.shape,',q.shape,k.shape,v.shape)
         s = K.batch_dot(hw_flatten(q), K.permute_dimensions(k,(0,2,1)))  # # [bs, N, M]
 #         print(s.shape)
@@ -466,7 +478,7 @@ class Img2TextCA(Layer):
                      kernel=self.kernel_o,
                      strides=(1,1), padding='same')
         o = K.bias_add(o, self.bias_o)
-#         o = kl.ELU(alpha=1.0)(o)
+#         o = kl.tanh(alpha=1.0)(o)
 #         print('o.shape:',o.shape)
 #         x_text = self.gamma1 * x1 
 # #         print('x_text.shape:',x_text,x_text.shape)
@@ -503,21 +515,32 @@ class EncDecAttention(Layer):
 #                                     axes={2: input_shape[-1]})
 #         self.built = True
     def call(self, inputs):
-        dec, enc = inputs
-        q = kl.Dense(self.filters_q)(dec)
-        q = kl.Activation('relu')(q)
-#         q = kl.ELU(alpha=1.0)(q)
-        k = kl.Dense(self.filters_k)(enc)
-        k = kl.Activation('relu')(k)
-#         k = kl.ELU(alpha=1.0)(k)
-        v = kl.Dense(self.filters_v)(enc)
-        v = kl.Activation('relu')(v)
-#         v = kl.ELU(alpha=1.0)(v)
+        if len(inputs)==2:
+            dec, enc = inputs
+            masks = None
+        elif len(inputs)==3:
+            dec, enc, masks = inputs
+        q = kl.Dense(self.filters_q,use_bias=True)(dec)
+        q = kl.Activation(activation)(q)
+#         q = kl.tanh(alpha=1.0)(q)
+        k = kl.Dense(self.filters_k,use_bias=True)(enc)
+        k = kl.Activation(activation)(k)
+#         k = kl.tanh(alpha=1.0)(k)
+        v = kl.Dense(self.filters_v,use_bias=True)(enc)
+        v = kl.Activation(activation)(v)
+#         v = kl.tanh(alpha=1.0)(v)
 #         print('q.shape,k.shape,v.shape,',q.shape,k.shape,v.shape)
         beta = K.batch_dot(q, K.permute_dimensions(k, (0,2,1)))  # # [bs, N, M]
         
+        if masks is not None:
+#             print('apply padding')
+            beta = kl.Multiply()([beta,masks])
+        
+        
         scores = K.softmax(beta, axis=-1)  # attention map  
-                        
+        
+        
+        
         o = K.batch_dot(scores, v)  # [bs, N, C]
 
         self.q_sh = tuple(q.shape.as_list())
